@@ -45,6 +45,7 @@ MAX_SPEED = 1.0      # hard throttle cap, same idea as drive_real.set_max_speed
 SEARCH_STEP = 2      # degrees between candidate headings (dynamic)
 HALF_CLEAR = 0.21    # meters, car half-width plus margin, inflates obstacles
 CENTER_BIAS = 0.006  # score penalty per degree off-center, stops ping-pong
+CORNER_SLOWDOWN = 0.5  # how much hard steering cuts the target speed
 
 _lock = threading.Lock()
 _params: dict = {}
@@ -82,7 +83,11 @@ def load_params():
         before = dict(_params)
         _params.update(yaml.safe_load(YAML_PATH.read_text()))
         _params['speed'] = set_max_speed(_params['speed'])
-        _params.setdefault('lookahead', 3.0)  # older yaml files lack this key
+        _params.setdefault('lookahead', 3.0)  # older yaml files lack these keys
+        _params.setdefault('speed_kp', 0.18)
+        _params.setdefault('speed_kd', 0.05)
+        # 0 = static, 1 = dynamic. Older yamls spell the mode out.
+        _params['mode'] = 1 if str(_params['mode']).strip() in ('1', 'dynamic') else 0
         if before and before != _params:
             _add_mark('yaml load')
 
@@ -109,6 +114,8 @@ class WallFollowNode(Node):
         self.create_subscription(Odometry, '/odom', self._odom_cb, qos_profile_sensor_data)
         self._last_error = 0.0
         self._enc = 0.0
+        self._speed_cmd = 0.0
+        self._last_speed_error = 0.0
 
     def _odom_cb(self, msg):
         self._enc = msg.twist.twist.linear.x
@@ -127,8 +134,8 @@ class WallFollowNode(Node):
         with _lock:
             p = dict(_params)
 
-        la = p['lookahead']
-        if p['mode'] == 'dynamic':
+        la = max(p['lookahead'], 0.1)
+        if int(p['mode']) == 1:
             degs = list(range(-int(p['width']), int(p['width']) + 1, SEARCH_STEP))
             dists = [min(self._mean_at(msg, d, p['window']), la) for d in degs]
             # An obstacle at d blocks every heading within atan(HALF_CLEAR/d)
@@ -157,15 +164,26 @@ class WallFollowNode(Node):
         self._last_error = error
         cmd = max(-1.0, min(1.0, cmd))
 
+        # Speed shaping, race_fast style: the slider is the throttle cap.
+        # Slow when the wall ahead is inside lookahead or when steering hard,
+        # and PD-track the target so the ramp is smooth.
+        front = min(self._mean_at(msg, 0, p['window']), la)
+        target = p['speed'] * min(front / la, 1.0) * (1.0 - CORNER_SLOWDOWN * abs(cmd))
+        serr = target - self._speed_cmd
+        self._speed_cmd += p['speed_kp'] * serr + p['speed_kd'] * (serr - self._last_speed_error)
+        self._last_speed_error = serr
+        self._speed_cmd = max(0.0, min(1.0, self._speed_cmd))
+
         out = AckermannDriveStamped()
-        out.drive.speed = set_max_speed(p['speed'])
+        out.drive.speed = set_max_speed(self._speed_cmd)
         out.drive.steering_angle = float(-cmd)  # wire positive = left on this car
         self._pub.publish(out)
 
         t = _now()
-        _rows.append(f'{t},{error:.4f},{cmd:.4f},{p["speed"]},{self._enc:.3f}\n')
+        _rows.append(f'{t},{error:.4f},{cmd:.4f},{self._speed_cmd:.3f},{self._enc:.3f}\n')
         _hist.append([t, round(error, 4)])
-        overlay.update({'error': round(error, 4), 'steer': round(cmd, 3)})
+        overlay.update({'error': round(error, 4), 'steer': round(cmd, 3),
+                        'speed_cmd': round(self._speed_cmd, 3)})
         scan = [[round(-math.degrees(msg.angle_min + i * msg.angle_increment), 1),
                  round(msg.ranges[i], 3)]
                 for i in range(0, len(msg.ranges), 3)
@@ -206,8 +224,8 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             with _lock:
                 changed = []
-                for k in ('speed', 'kp', 'kd', 'window', 'lookahead',
-                          'look_angle', 'width', 'side_weight'):
+                for k in ('speed', 'kp', 'kd', 'speed_kp', 'speed_kd', 'window',
+                          'lookahead', 'look_angle', 'width', 'side_weight'):
                     if k in data:
                         v = float(data[k])
                         if k == 'speed':

@@ -25,12 +25,16 @@ Dashboard: `http://<car-ip>:8081`. Re-running setup.sh updates the code and keep
 
 ## Modes
 
-`mode` in wallfollow.yaml selects the controller. It is switched only by editing the file, then pressing Reset or Load. There is no UI toggle.
+`mode` in wallfollow.yaml selects the controller: 0 = static, 1 = dynamic. It is switched only by editing the file, then pressing Reset or Load. There is no UI toggle.
 
 - `static`: mirrored side windows at look_angle. Error = right minus left in meters, setpoint 0 keeps the car centered.
 - `dynamic`: steers toward the most open heading in a front arc, obstacles inflated by the car's half width. width opens and closes the arc, side_weight biases one side.
 
 All parameters are documented in wallfollow.yaml.
+
+## Speed
+
+The speed slider is a throttle cap, not a constant command. The target speed drops when the wall ahead is inside lookahead and when steering hard, and speed_kp / speed_kd ramp the throttle toward that target. The live throttle shows in the top bar.
 
 ## Safety
 

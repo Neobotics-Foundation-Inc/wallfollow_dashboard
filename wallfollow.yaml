@@ -1,12 +1,14 @@
 # RACECAR Neo wall-follow parameters.
-# Switch mode by editing this file, then press Load on the dashboard
-# (or restart racecar-wallfollow). There is no UI toggle for mode.
-mode: static          # static | dynamic
+# Switch mode by editing this file, then press Reset or Load on the
+# dashboard (or restart the service). There is no UI toggle for mode.
+mode: 0               # 0 = static, 1 = dynamic
 
 speed: 0.0            # throttle command 0..1 (drive.speed). Ships at 0.0: the
                       # neoracer mux has no ROS deadman (the transmitter SWC
                       # switch is the gate), so nothing drives until you raise it.
 kp: 0.5               # steering strength
+speed_kp: 0.18        # throttle ramp strength toward the target speed
+speed_kd: 0.05        # throttle damper. Raise this if the speed surges.
 kd: 4.0               # damper. Raise this if the car wobbles.
 window: 10.0          # averaging window per ray, in degrees. Smooths noise.
 lookahead: 3.0        # meters. Distances are capped here in both modes, so an

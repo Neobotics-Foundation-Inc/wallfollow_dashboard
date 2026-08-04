@@ -35,7 +35,7 @@
 <div class="topbar">
 <div>
 <h1>Wall Follow Dashboard</h1>
-<div class="meta">mode: <b id="mode">?</b> &bull; error: <b id="err">?</b> &bull; steer: <b id="steer">?</b> &bull; odom: <b id="enc">?</b> m/s</div>
+<div class="meta">mode: <b id="mode">?</b> &bull; error: <b id="err">?</b> &bull; steer: <b id="steer">?</b> &bull; throttle: <b id="thr">?</b> &bull; odom: <b id="enc">?</b> m/s</div>
 </div>
 <button onclick="reset()" title="Re-read wallfollow.yaml, picks up a mode switch">Reset</button>
 </div>
@@ -69,11 +69,12 @@
 </div>
 
 <script>
-const FIELDS = { static: ['speed', 'kp', 'kd', 'window', 'lookahead'],
-                 dynamic: ['speed', 'kp', 'kd', 'window', 'lookahead', 'width', 'side_weight'] };
-const UNITS = { speed: '0 to 1 throttle', kp: 'steer per m of error', kd: 'damper gain',
+const FIELDS = { static: ['speed', 'kp', 'kd', 'speed_kp', 'speed_kd', 'window', 'lookahead'],
+                 dynamic: ['speed', 'kp', 'kd', 'speed_kp', 'speed_kd', 'window', 'lookahead', 'width', 'side_weight'] };
+const UNITS = { speed: '0 to 1 throttle cap', kp: 'steer per m of error', kd: 'damper gain',
+                speed_kp: 'throttle ramp gain', speed_kd: 'throttle damper gain',
                 window: 'deg', lookahead: 'm', width: 'deg', side_weight: 'm per deg' };
-const STEPS = { kp: '0.01', kd: '0.01', side_weight: '0.01' };  // spinner arrows step the hundredths
+const STEPS = { kp: '0.01', kd: '0.01', speed_kp: '0.01', speed_kd: '0.01', side_weight: '0.01' };  // spinner arrows step the hundredths
 let mode = 'static';
 
 function post(path, body) {
@@ -206,10 +207,11 @@ function update() {
   busy = true;
   fetch('/state').then(r => r.json()).then(d => {
     busy = false;
-    mode = d.params.mode;
+    mode = (d.params.mode == 1 || d.params.mode === 'dynamic') ? 'dynamic' : 'static';
     document.getElementById('mode').textContent = mode;
     document.getElementById('err').textContent = d.overlay.error ?? '?';
     document.getElementById('steer').textContent = d.overlay.steer ?? '?';
+    document.getElementById('thr').textContent = d.overlay.speed_cmd ?? '?';
     document.getElementById('enc').textContent = d.enc_speed;
     buildForm(d.params);
     document.getElementById('detail').textContent = mode === 'static'
