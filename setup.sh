@@ -5,7 +5,7 @@
 #   scp -r neoracer_wallfollow racecar@<car-ip>:~/wallfollow
 #   ssh racecar@<car-ip> 'bash ~/wallfollow/setup.sh'
 #
-# Installs racecar-wallfollow.service, enables it at boot, and starts it.
+# Installs neoracer-wallfollow.service, enables it at boot, and starts it.
 # Dashboard comes up at http://<car-ip>:8081. Idempotent: safe to re-run.
 #
 # Needs nothing beyond the stock image: ROS Humble at /opt/ros/humble, the
