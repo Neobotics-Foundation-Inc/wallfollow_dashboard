@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wall Follow Dashboard</title>
+<style>
+  /* Neobotics tokens: Halo White dominant, Tarmac Blue #1B2036, Circuit Steel
+     #E2E2E2, Carbon Black #1D1D27, brand red #FF0033. From nb-tokens.ts. */
+  :root { --white: #FFFFFF; --halo: #F5F5F7; --steel: #E2E2E2; --carbon: #1D1D27; --tarmac: #1B2036; --red: #FF0033; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: var(--white); color: var(--carbon); }
+  .topbar { background: var(--tarmac); color: var(--halo); padding: 0.8rem 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+  .topbar button { background: transparent; border: 1px solid rgba(245, 245, 247, 0.5); color: var(--halo); font-family: inherit; padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; margin: 0; }
+  .topbar button:hover { background: rgba(245, 245, 247, 0.15); }
+  .topbar h1 { font-family: 'Space Grotesk', 'Helvetica Neue', sans-serif; font-size: 1.3rem; }
+  .meta { color: rgba(245, 245, 247, 0.72); font-size: 0.85rem; margin-top: 0.2rem; }
+  .meta b { color: var(--white); }
+  main { padding: 1rem 1.5rem; }
+  .grid { display: grid; grid-template-columns: 500px 1fr 280px; gap: 1rem; margin-bottom: 1rem; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--white); border: 1px solid var(--steel); border-radius: 12px; padding: 1rem; box-shadow: 0 6px 18px rgba(29, 29, 39, 0.08); }
+  .card h2 { font-family: 'Space Grotesk', 'Helvetica Neue', sans-serif; font-size: 1rem; color: var(--tarmac); margin-bottom: 0.5rem; }
+  canvas { background: var(--tarmac); border-radius: 6px; width: 100%; }
+  label { display: block; color: rgba(29, 29, 39, 0.6); font-size: 0.8rem; margin-top: 0.6rem; }
+  input { width: 100%; background: var(--white); border: 1px solid var(--steel); color: var(--carbon); font-family: inherit; padding: 0.3rem; border-radius: 6px; }
+  input[type=range] { accent-color: var(--red); border: none; padding: 0; }
+  button, select { background: var(--white); border: 1px solid var(--tarmac); color: var(--tarmac); font-family: inherit; padding: 0.35rem 0.8rem; border-radius: 6px; margin: 0.8rem 0.4rem 0 0; cursor: pointer; }
+  button:hover { background: var(--steel); }
+  .readout { font-size: 0.85rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+<div>
+<h1>Wall Follow Dashboard</h1>
+<div class="meta">mode: <b id="mode">?</b> &bull; error: <b id="err">?</b> &bull; steer: <b id="steer">?</b> &bull; odom: <b id="enc">?</b> m/s</div>
+</div>
+<button onclick="reset()" title="Re-read wallfollow.yaml, picks up a mode switch">Reset</button>
+</div>
+<main>
+<div class="grid">
+  <div class="card">
+    <h2>Lidar</h2>
+    <canvas id="lidar" width="420" height="420"></canvas>
+  </div>
+  <div class="card">
+    <h2>Error vs setpoint (live)</h2>
+    <canvas id="chart" width="560" height="380"></canvas>
+  </div>
+  <div class="card">
+    <h2>Tune</h2>
+    <div id="form"></div>
+    <button onclick="apply()">Apply</button>
+    <button onclick="post('/save')">Save</button>
+    <button onclick="reset()">Load</button>
+    <div class="readout" id="detail"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Logs</h2>
+  <button onclick="saveLog()">Save log</button>
+  <select id="logsel"></select>
+  <button onclick="loadLog()">Load log</button>
+  <span class="readout" id="loginfo"></span>
+  <canvas id="logchart" width="900" height="160"></canvas>
+</div>
+
+<script>
+const FIELDS = { static: ['speed', 'kp', 'kd', 'window', 'lookahead'],
+                 dynamic: ['speed', 'kp', 'kd', 'window', 'lookahead', 'width', 'side_weight'] };
+const UNITS = { speed: '0 to 1 throttle', kp: 'steer per m of error', kd: 'damper gain',
+                window: 'deg', lookahead: 'm', width: 'deg', side_weight: 'm per deg' };
+const STEPS = { kp: '0.01', kd: '0.01', side_weight: '0.01' };  // spinner arrows step the hundredths
+let mode = 'static';
+
+function post(path, body) {
+  return fetch(path, { method: 'POST', body: body ? JSON.stringify(body) : null });
+}
+
+function reset() {
+  // Re-read the yaml (the mode switch lives there) and rebuild the form.
+  post('/load').then(() => { document.getElementById('form').dataset.mode = ''; });
+}
+
+function apply() {
+  const out = {};
+  for (const f of FIELDS[mode]) out[f] = parseFloat(document.getElementById('in_' + f).value);
+  post('/params', out);
+}
+
+function buildForm(params) {
+  // Rebuild only when the mode changes, so typing is not interrupted.
+  if (document.getElementById('form').dataset.mode === mode) return;
+  document.getElementById('form').dataset.mode = mode;
+  document.getElementById('form').innerHTML = FIELDS[mode].map(f => f === 'speed'
+    // Speed is a drag tuner: 0 to 1, applies live while dragging.
+    ? `<label>speed (${UNITS.speed}) <b id="speedval">${params.speed}</b>
+       <input id="in_speed" type="range" min="0" max="1" step="0.01" value="${params.speed}"
+        oninput="document.getElementById('speedval').textContent = this.value;
+                 post('/params', {speed: parseFloat(this.value)})"></label>`
+    : `<label>${f} (${UNITS[f]})<input id="in_${f}" type="number" step="${STEPS[f] || 'any'}" value="${params[f]}"></label>`).join('');
+}
+
+let VIEW = 4.0;  // lidar view radius in meters, scroll wheel to zoom
+
+function drawLidar(scan, ov) {
+  const c = document.getElementById('lidar'), x = c.getContext('2d');
+  const cx = c.width / 2, cy = c.height / 2, scale = cx / VIEW;
+  const L = ov.la ? Math.min(ov.la, VIEW) : VIEW;  // rays reach the lookahead cap
+  x.clearRect(0, 0, c.width, c.height);
+  // 0 deg is the nose (up). Positive degrees are to the right.
+  x.fillStyle = '#F5F5F7';
+  for (const [deg, r] of scan) {
+    const a = deg * Math.PI / 180;
+    x.fillRect(cx + Math.sin(a) * r * scale - 1, cy - Math.cos(a) * r * scale - 1, 2, 2);
+  }
+  const ray = (deg, r, color, w) => {
+    const a = deg * Math.PI / 180;
+    x.strokeStyle = color; x.lineWidth = w; x.beginPath();
+    x.moveTo(cx, cy); x.lineTo(cx + Math.sin(a) * r * scale, cy - Math.cos(a) * r * scale); x.stroke();
+  };
+  if (ov.mode === 'static') {
+    for (const s of [1, -1]) {  // window edges, then the measured distance ray
+      ray(s * ov.look_angle - ov.window / 2, L, 'rgba(245, 245, 247, 0.48)', 1);
+      ray(s * ov.look_angle + ov.window / 2, L, 'rgba(245, 245, 247, 0.48)', 1);
+      ray(s * ov.look_angle, Math.min(s > 0 ? ov.right : ov.left, VIEW), '#FF0033', 2);
+    }
+  } else if (ov.mode === 'dynamic') {
+    ray(-ov.width, L, 'rgba(245, 245, 247, 0.48)', 1);
+    ray(ov.width, L, 'rgba(245, 245, 247, 0.48)', 1);
+    ray(ov.target_deg, L, '#FF0033', 2);
+  }
+  x.fillStyle = '#FF0033';
+  x.fillRect(cx - 4, cy - 7, 8, 14);  // the car
+  x.fillStyle = 'rgba(245, 245, 247, 0.72)'; x.font = '11px Helvetica';
+  x.fillText(`view ${VIEW.toFixed(1)} m (scroll to zoom)`, 6, c.height - 6);
+}
+
+document.getElementById('lidar').addEventListener('wheel', e => {
+  e.preventDefault();
+  VIEW = Math.min(12, Math.max(1, VIEW * (e.deltaY > 0 ? 1.2 : 1 / 1.2)));
+});
+
+function drawSeries(canvasId, series, labels, marks) {
+  // series: list of {pts: [[t, v]], color}. Each scaled to its own max.
+  // marks: [[t, label]] tuning changes, drawn as glowing yellow lines.
+  const c = document.getElementById(canvasId), x = c.getContext('2d');
+  x.clearRect(0, 0, c.width, c.height);
+  x.strokeStyle = 'rgba(245, 245, 247, 0.48)'; x.setLineDash([4, 4]);
+  x.beginPath(); x.moveTo(0, c.height / 2); x.lineTo(c.width, c.height / 2); x.stroke();
+  x.setLineDash([]);
+  for (const s of series) {
+    if (s.pts.length < 2) continue;
+    const t0 = s.pts[0][0], t1 = s.pts[s.pts.length - 1][0];
+    const max = Math.max(0.2, ...s.pts.map(p => Math.abs(p[1])));
+    x.strokeStyle = s.color; x.lineWidth = 1.5; x.beginPath();
+    for (let i = 0; i < s.pts.length; i++) {
+      const px = (s.pts[i][0] - t0) / (t1 - t0 || 1) * c.width;
+      const py = c.height / 2 - s.pts[i][1] / max * (c.height / 2 - 8);
+      i ? x.lineTo(px, py) : x.moveTo(px, py);
+    }
+    x.stroke();
+    s.max = max;
+  }
+  // Tuning-change markers: vertical yellow line + what changed.
+  const m0 = series[0];
+  if (marks && m0 && m0.pts.length > 1) {
+    const t0 = m0.pts[0][0], t1 = m0.pts[m0.pts.length - 1][0];
+    x.save();
+    for (const [t, label] of marks) {
+      if (t < t0 || t > t1) continue;
+      const px = (t - t0) / (t1 - t0 || 1) * c.width;
+      x.strokeStyle = '#FFD700'; x.lineWidth = 1.5;
+      x.shadowColor = '#FFD700'; x.shadowBlur = 8;
+      x.setLineDash([6, 4]);
+      x.beginPath(); x.moveTo(px, 18); x.lineTo(px, c.height); x.stroke();
+      x.setLineDash([]);
+      x.fillStyle = '#FFD700'; x.font = '11px Helvetica';
+      x.fillText(label, Math.min(px + 4, c.width - x.measureText(label).width - 4), 30);
+    }
+    x.restore();
+  }
+  // Axis values from the first series: y ticks at +max / 0 / -max, x in seconds.
+  const s0 = series[0];
+  if (s0 && s0.pts.length > 1) {
+    const k = s0.scale || 1, u = s0.unit || '';
+    const t0 = s0.pts[0][0], t1 = s0.pts[s0.pts.length - 1][0];
+    x.fillStyle = 'rgba(245, 245, 247, 0.72)'; x.font = '11px Helvetica';
+    x.fillText(`+${(s0.max * k).toFixed(0)} ${u}`, 4, 28);
+    x.fillText(`0 ${u}`, 4, c.height / 2 - 4);
+    x.fillText(`-${(s0.max * k).toFixed(0)} ${u}`, 4, c.height - 18);
+    x.fillText(`${t0.toFixed(1)} s`, 4, c.height - 4);
+    const end = `${t1.toFixed(1)} s`;
+    x.fillText(end, c.width - x.measureText(end).width - 4, c.height - 4);
+  }
+  x.fillStyle = '#F5F5F7'; x.font = '12px Helvetica';
+  x.fillText(labels(series), 8, 14);
+}
+
+let busy = false;
+function update() {
+  if (busy) return;  // do not stack requests if the network lags
+  busy = true;
+  fetch('/state').then(r => r.json()).then(d => {
+    busy = false;
+    mode = d.params.mode;
+    document.getElementById('mode').textContent = mode;
+    document.getElementById('err').textContent = d.overlay.error ?? '?';
+    document.getElementById('steer').textContent = d.overlay.steer ?? '?';
+    document.getElementById('enc').textContent = d.enc_speed;
+    buildForm(d.params);
+    document.getElementById('detail').textContent = mode === 'static'
+      ? `left ${d.overlay.left ?? '?'} m | right ${d.overlay.right ?? '?'} m`
+      : `target ${d.overlay.target_deg ?? '?'} deg`;
+    drawLidar(d.scan, d.overlay);
+    // Static error is meters, shown in cm. Dynamic error is normalized -1..1.
+    const cm = mode === 'static';
+    drawSeries('chart', [{ pts: d.hist, color: '#FF0033', scale: cm ? 100 : 1, unit: cm ? 'cm' : '' }],
+      () => cm
+        ? `error ${(d.overlay.error * 100).toFixed(0)} cm (red) | setpoint 0 cm (dashed)`
+        : `error ${d.overlay.error ?? '?'} (red) | setpoint 0 (dashed)`,
+      d.marks);
+  }).catch(() => { busy = false; });
+}
+
+function loadLog() {
+  const f = document.getElementById('logsel').value;
+  if (!f) return;
+  fetch('/logs/' + f).then(r => r.text()).then(txt => {
+    const lines = txt.trim().split('\n');
+    const marks = lines.filter(l => l.startsWith('# mark'))
+      .map(l => { const p = l.split(','); return [parseFloat(p[1]), p.slice(2).join(',')]; });
+    const rows = lines.filter(l => !l.startsWith('#')).slice(1).map(l => l.split(',').map(Number));
+    document.getElementById('loginfo').textContent = `${f}: ${rows.length} rows, ${marks.length} changes`;
+    drawSeries('logchart', [
+      { pts: rows.map(r => [r[0], r[1]]), color: '#FF0033' },
+      { pts: rows.map(r => [r[0], r[4]]), color: '#FFFFFF' },
+    ], s => `error (red, +/- ${s[0].max?.toFixed(2)}) | odom m/s (white, +/- ${s[1].max?.toFixed(2)})`,
+    marks);
+  });
+}
+
+function saveLog() {
+  // Snapshot what is on the live chart to a csv, then show it right away.
+  post('/logs/save').then(() => refreshLogs(true));
+}
+
+function refreshLogs(loadLatest) {
+  fetch('/logs').then(r => r.json()).then(names => {
+    const sel = document.getElementById('logsel');
+    sel.innerHTML = names.map(n => `<option>${n}</option>`).join('');
+    sel.selectedIndex = names.length - 1;  // Load defaults to the latest save
+    if (loadLatest && names.length) loadLog();
+  });
+}
+
+refreshLogs(false);
+
+update();
+setInterval(update, 120);  // lidar publishes ~7 Hz; poll faster than every scan
+</script>
+</main>
+</body>
+</html>
