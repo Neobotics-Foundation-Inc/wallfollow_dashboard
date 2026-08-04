@@ -16,6 +16,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST=/home/racecar/wallfollow
 SVC=neoracer-wallfollow.service
 
+# `bash setup.sh disable` stops the service and keeps it off across boots.
+# `bash setup.sh enable` turns it back on. No arguments installs as usual.
+if [[ "${1:-}" == "disable" ]]; then
+    sudo systemctl disable --now "$SVC"
+    echo "$SVC stopped and disabled. It will not start at boot."
+    echo "Re-enable with: bash setup.sh enable"
+    exit 0
+elif [[ "${1:-}" == "enable" ]]; then
+    sudo systemctl enable --now "$SVC"
+    echo "$SVC enabled and started."
+    exit 0
+fi
+
 # The service unit expects the files at $DEST. If the script runs from
 # somewhere else, copy them over. Keep an existing tuning yaml.
 if [[ "$SCRIPT_DIR" != "$DEST" ]]; then
