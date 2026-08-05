@@ -4,6 +4,16 @@ Wall following as a service for the Neoracer, with a live tuning dashboard on po
 
 One process subscribes to /scan, computes PD steering, publishes AckermannDriveStamped on /drive, and serves the dashboard. Runs as a systemd service that starts on boot, alongside the stock neoracer services.
 
+## Contents
+
+- [Install](#install)
+- [Service control](#service-control)
+- [Dashboard](#dashboard)
+- [Modes](#modes)
+- [Speed](#speed)
+- [Safety](#safety)
+- [Car specifics](#car-specifics)
+
 ## Install
 
 From a laptop on the car's network:
@@ -14,6 +24,22 @@ ssh racecar@<car-ip> 'bash ~/wallfollow/setup.sh'
 ```
 
 Dashboard: `http://<car-ip>:8081`. Re-running setup.sh updates the code and keeps the car's tuned wallfollow.yaml.
+
+## Service control
+
+Run on the car, from `~/wallfollow`:
+
+| Command | Effect |
+| --- | --- |
+| `bash setup.sh` | install or update files and unit, then start |
+| `bash setup.sh restart` | restart; takes port 8081 back first |
+| `bash setup.sh remove` | stop, disable, and uninstall the unit; keeps wallfollow.yaml |
+| `bash setup.sh disable` | stop and keep off across boots |
+| `bash setup.sh enable` | turn back on and start |
+
+Install, restart, and enable clear port 8081 before starting. A dashboard left over from an earlier install under a different unit name, or any other service on 8081, is stopped through systemd; a `wallfollow.py` started by hand is signalled directly. Without this the new instance would fail to bind and loop on `Restart=on-failure`.
+
+After `remove`, `~/wallfollow` and its tuned wallfollow.yaml stay in place; `bash setup.sh` reinstalls.
 
 ## Dashboard
 
