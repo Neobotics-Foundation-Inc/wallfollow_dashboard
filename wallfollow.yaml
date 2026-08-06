@@ -1,7 +1,7 @@
 # RACECAR Neo wall-follow parameters.
 # Switch mode by editing this file, then press Reset or Load on the
 # dashboard (or restart the service). There is no UI toggle for mode.
-mode: 0               # 0 = static, 1 = dynamic
+mode: 1               # 0 = static, 1 = dynamic
 
 speed: 0.0            # throttle command 0..1 (drive.speed). Ships at 0.0: the
                       # neoracer mux has no ROS deadman (the transmitter SWC
