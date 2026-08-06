@@ -16,30 +16,32 @@ One process subscribes to /scan, computes PD steering, publishes AckermannDriveS
 
 ## Install
 
-From a laptop on the car's network:
+On the car:
 
 ```
-scp -r neoracer_wallfollow racecar@<car-ip>:~/wallfollow
-ssh racecar@<car-ip> 'bash ~/wallfollow/setup.sh'
+git clone https://github.com/Neobotics-Foundation-Inc/wallfollow_dashboard.git
+bash wallfollow_dashboard/setup.sh
 ```
 
-Dashboard: `http://<car-ip>:8081`. Re-running setup.sh updates the code and keeps the car's tuned wallfollow.yaml.
+setup.sh points neoracer-wallfollow.service at this checkout wherever it sits and copies nothing, so the repository can live anywhere the racecar user can read. A first install leaves the service stopped and disabled; start it with `bash setup.sh enable`. Dashboard: `http://<car-ip>:8081`.
+
+Re-running setup.sh updates the unit, keeps the car's tuned wallfollow.yaml, and leaves the enable state alone: a running service restarts on the new code, a stopped one stays stopped.
 
 ## Service control
 
-Run on the car, from `~/wallfollow`:
+Run on the car, from the checkout:
 
 | Command | Effect |
 | --- | --- |
-| `bash setup.sh` | install or update files and unit, then start |
+| `bash setup.sh` | install or update the unit; a first install does not start it |
+| `bash setup.sh enable` | start now and at every boot |
+| `bash setup.sh disable` | stop now and keep off across boots |
 | `bash setup.sh restart` | restart; takes port 8081 back first |
 | `bash setup.sh remove` | stop, disable, and uninstall the unit; keeps wallfollow.yaml |
-| `bash setup.sh disable` | stop and keep off across boots |
-| `bash setup.sh enable` | turn back on and start |
 
-Install, restart, and enable clear port 8081 before starting. A dashboard left over from an earlier install under a different unit name, or any other service on 8081, is stopped through systemd; a `wallfollow.py` started by hand is signalled directly. Without this the new instance would fail to bind and loop on `Restart=on-failure`.
+Enable, restart, and an update of a running service clear port 8081 first. A dashboard left over from an earlier install under a different unit name or directory, or any other service on 8081, is stopped through systemd; a `wallfollow.py` started by hand is signalled directly. Without this the new instance would fail to bind and loop on `Restart=on-failure`.
 
-After `remove`, `~/wallfollow` and its tuned wallfollow.yaml stay in place; `bash setup.sh` reinstalls.
+After `remove`, the checkout and its tuned wallfollow.yaml stay in place; `bash setup.sh` reinstalls.
 
 ## Dashboard
 

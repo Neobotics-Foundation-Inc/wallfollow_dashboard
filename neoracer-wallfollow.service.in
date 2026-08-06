@@ -9,11 +9,11 @@ Group=racecar
 ExecStart=/bin/bash -c '\
     source /opt/ros/humble/setup.bash && \
     source /home/racecar/ros2_ws/install/setup.bash && \
-    exec python3 /home/racecar/wallfollow/wallfollow.py'
+    exec python3 @DIR@/wallfollow.py'
 Restart=on-failure
 RestartSec=5
 Environment=HOME=/home/racecar
-WorkingDirectory=/home/racecar/wallfollow
+WorkingDirectory=@DIR@
 
 [Install]
 WantedBy=multi-user.target

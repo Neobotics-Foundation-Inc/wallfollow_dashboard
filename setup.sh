@@ -1,28 +1,40 @@
 #!/bin/bash
-# Set up the Wall Follow Dashboard + service on a stock Neoracer.
+# Set up the Wall Follow Dashboard service on a stock Neoracer.
 #
-# From your laptop, on the same network as the car:
-#   scp -r neoracer_wallfollow racecar@<car-ip>:~/wallfollow
-#   ssh racecar@<car-ip> 'bash ~/wallfollow/setup.sh'
+# On the car:
+#   git clone https://github.com/Neobotics-Foundation-Inc/wallfollow_dashboard.git
+#   bash wallfollow_dashboard/setup.sh
 #
-# Installs neoracer-wallfollow.service, enables it at boot, and starts it.
-# Dashboard comes up at http://<car-ip>:8081. Idempotent: safe to re-run.
+# The service runs the files where this repository already sits. setup.sh
+# writes that path into the unit and copies nothing, so the checkout can live
+# anywhere. Idempotent: safe to re-run.
+#
+# A first install leaves neoracer-wallfollow.service installed, stopped, and
+# disabled; start it with `bash setup.sh enable`. A re-run keeps whatever state
+# the service is in, restarting it only when it is already running.
 #
 # Subcommands:
-#   (none)    install or update, then start
+#   (none)    install or update the unit; a first install does not start it
+#   enable    start now and at every boot
+#   disable   stop now and keep off across boots
 #   restart   restart the service, taking port 8081 back first
-#   remove    stop, disable, and uninstall the unit; tuning yaml is kept
-#   disable   stop and keep off across boots
-#   enable    turn back on and start
+#   remove    stop, disable, and uninstall the unit; files here are kept
 #
 # Needs nothing beyond the stock image: ROS Humble at /opt/ros/humble, the
 # driver workspace at /home/racecar/ros2_ws, and the racecar user.
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST=/home/racecar/wallfollow
 SVC=neoracer-wallfollow.service
+UNIT_IN="$SCRIPT_DIR/$SVC.in"
+UNIT="/etc/systemd/system/$SVC"
 PORT=8081
+
+# The unit ships as a template; @DIR@ becomes this checkout, so the service
+# always runs the copy it was installed from.
+render_unit() {
+    sed "s|@DIR@|$SCRIPT_DIR|g" "$UNIT_IN"
+}
 
 # PIDs listening on $PORT. Unprivileged ss names only our own processes, so
 # fall back to sudo when a listener exists but its owner stays hidden.
@@ -57,10 +69,10 @@ foreign_pids() {
     done
 }
 
-# Clear anything else off $PORT: an earlier run of this dashboard under a
-# different unit name, a sibling dashboard, or a hand-started wallfollow.py.
-# Killing a service-owned PID would only trip its own Restart=on-failure, so
-# stop the owning unit instead.
+# Clear anything else off $PORT: an earlier install of this dashboard under a
+# different unit name or directory, a sibling dashboard, or a hand-started
+# wallfollow.py. Killing a service-owned PID would only trip its own
+# Restart=on-failure, so stop the owning unit instead.
 free_port() {
     local pid unit
     for pid in $(foreign_pids); do
@@ -84,6 +96,16 @@ free_port() {
     [[ -z "$(foreign_pids)" ]] || echo "  warning: port $PORT is still busy"
 }
 
+# Start and confirm it stayed up; a bind failure or a traceback shows here
+# rather than as a service that quietly loops on Restart=on-failure.
+start_and_check() {
+    sudo systemctl "$1" "$SVC"
+    sleep 3
+    systemctl is-active --quiet "$SVC" || {
+        echo "$SVC failed to start:"; systemctl status "$SVC" --no-pager | tail -5; exit 1; }
+    echo "Wall Follow Dashboard running: http://$(hostname -I | awk '{print $1}'):$PORT"
+}
+
 case "${1:-}" in
     disable)
         sudo systemctl disable --now "$SVC"
@@ -93,26 +115,22 @@ case "${1:-}" in
         ;;
     enable)
         free_port
-        sudo systemctl enable --now "$SVC"
-        echo "$SVC enabled and started."
+        sudo systemctl enable "$SVC" 2>/dev/null
+        start_and_check start
         exit 0
         ;;
     restart)
         sudo systemctl stop "$SVC" 2>/dev/null || true
         free_port
-        sudo systemctl restart "$SVC"
-        sleep 3
-        systemctl is-active --quiet "$SVC" || {
-            echo "$SVC failed to start:"; systemctl status "$SVC" --no-pager | tail -5; exit 1; }
-        echo "$SVC restarted: http://$(hostname -I | awk '{print $1}'):$PORT"
+        start_and_check restart
         exit 0
         ;;
     remove)
         sudo systemctl disable --now "$SVC" 2>/dev/null || true
-        sudo rm -f "/etc/systemd/system/$SVC"
+        sudo rm -f "$UNIT"
         sudo systemctl daemon-reload
         sudo systemctl reset-failed "$SVC" 2>/dev/null || true
-        echo "$SVC removed. Files in $DEST are untouched."
+        echo "$SVC removed. Files in $SCRIPT_DIR are untouched."
         echo "Reinstall with: bash setup.sh"
         exit 0
         ;;
@@ -124,26 +142,31 @@ case "${1:-}" in
         ;;
 esac
 
-# The service unit expects the files at $DEST. If the script runs from
-# somewhere else, copy them over. Keep an existing tuning yaml.
-if [[ "$SCRIPT_DIR" != "$DEST" ]]; then
-    mkdir -p "$DEST"
-    cp "$SCRIPT_DIR/wallfollow.py" "$SCRIPT_DIR/wallfollow.html" "$SCRIPT_DIR/$SVC" \
-       "$SCRIPT_DIR/setup.sh" "$DEST/"
-    [[ -f "$DEST/wallfollow.yaml" ]] || cp "$SCRIPT_DIR/wallfollow.yaml" "$DEST/"
-fi
+rendered="$(mktemp)"
+trap 'rm -f "$rendered"' EXIT
+render_unit >"$rendered"
 
-if ! cmp -s "$DEST/$SVC" "/etc/systemd/system/$SVC" 2>/dev/null; then
-    sudo install -m 0644 "$DEST/$SVC" "/etc/systemd/system/$SVC"
+# Whether this is a first install decides the service state below, so read it
+# before the unit lands.
+first_install=1
+[[ -f "$UNIT" ]] && first_install=0
+
+if ! cmp -s "$rendered" "$UNIT"; then
+    sudo install -m 0644 "$rendered" "$UNIT"
     sudo systemctl daemon-reload
     echo "  $SVC: installed"
 fi
 
-sudo systemctl stop "$SVC" 2>/dev/null || true
-free_port
-sudo systemctl enable "$SVC" 2>/dev/null
-sudo systemctl restart "$SVC"    # pick up file changes on re-run
-
-sleep 3
-systemctl is-active --quiet "$SVC" || { echo "$SVC failed to start:"; systemctl status "$SVC" --no-pager | tail -5; exit 1; }
-echo "Wall Follow Dashboard running: http://$(hostname -I | awk '{print $1}'):$PORT"
+# A first install stays off until someone asks for it. A re-run is an update,
+# so it leaves the enable state alone and only restarts a service that is
+# already running, picking up the new code.
+if (( first_install )); then
+    echo "$SVC installed, stopped and disabled."
+    echo "Start it with: bash setup.sh enable"
+elif systemctl is-active --quiet "$SVC"; then
+    sudo systemctl stop "$SVC"
+    free_port
+    start_and_check start
+else
+    echo "$SVC updated. It is not running; start it with: bash setup.sh enable"
+fi
