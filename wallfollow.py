@@ -119,7 +119,6 @@ class WallFollowNode(Node):
         self._enc_stamp = 0.0
         self._speed_cmd = 0.0
         self._trim = 0.0
-        self._target_f = 0.0
         self._last_speed_error = 0.0
 
     def _odom_cb(self, msg):
@@ -184,47 +183,31 @@ class WallFollowNode(Node):
             road = min(corridor[len(degs) // 2], corridor[best])
         else:
             road = front
-        # Slider is the standard 0..1 command; max_mps converts it to the
-        # real speed the regulator chases (1.0 = the car's top speed).
+        # Speed, kept simple: the slider IS the throttle. With speed_kp
+        # and speed_kd at zero the car holds that constant command, exactly
+        # like rc.drive.set_speed_angle. Nonzero gains bend the throttle
+        # toward the road-shaped target using measured speed: slower into
+        # corners, corrected for battery and surface. Stale odometry just
+        # falls back to the constant command.
         target = p['speed'] * p['max_mps'] * min(road / la, 1.0)
-        if time.monotonic() - self._enc_stamp > 0.5:
-            # No fresh measurement: never integrate blind. Stop.
-            self._speed_cmd = 0.0
+        serr = target - self._enc
+        gains_off = p['speed_kp'] == 0 and p['speed_kd'] == 0
+        odom_stale = time.monotonic() - self._enc_stamp > 0.5
+        if p['speed'] <= 1e-3:
             self._trim = 0.0
-            serr = 0.0
-            self._target_f = 0.0
+            self._speed_cmd = 0.0
+        elif gains_off or odom_stale:
+            self._trim = 0.0
+            self._speed_cmd = p['speed']
         else:
-            # Feed-forward from the road: target/max_mps is the throttle that
-            # roughly holds the target, applied instantly when the road opens
-            # so straights start fast. speed_kp/kd only trim the remainder
-            # against measured speed instead of building the whole command.
-            # Low-pass the target: the road estimate jitters scan to scan
-            # and feed-forward would pump the throttle with it. ~0.35 s filter.
-            self._target_f += 0.35 * (target - self._target_f)
-            target = self._target_f
-            serr = target - self._enc
-            if target <= 1e-3:
-                # Slider or curriculum at zero means STOP, unconditionally.
-                self._trim = 0.0
-                self._target_f = 0.0
-                self._speed_cmd = 0.0
-                self._last_speed_error = serr
-            else:
-                # Windup guards: never integrate up while the command is high
-                # but the car is not moving (SWB off, held, or blocked), and
-                # keep the trim small: the feed-forward carries the bulk.
-                blocked = self._enc < 0.05 and self._speed_cmd > 0.3
-                if serr < 0 or not blocked:
-                    self._trim += p['speed_kp'] * serr \
-                        + p['speed_kd'] * (serr - self._last_speed_error)
-                if p['speed_kp'] == 0 and p['speed_kd'] == 0:
-                    # Gains at zero mean pure feed-forward: forget any
-                    # correction accumulated while they were active.
-                    self._trim = 0.0
-                self._trim = max(-0.5, min(0.3, self._trim))
-                self._speed_cmd = target / p['max_mps'] + self._trim
+            # Never integrate up while commanded but not moving (gated).
+            blocked = self._enc < 0.05 and self._speed_cmd > 0.3
+            if serr < 0 or not blocked:
+                self._trim += p['speed_kp'] * serr \
+                    + p['speed_kd'] * (serr - self._last_speed_error)
+            self._trim = max(-1.0, min(0.3, self._trim))
+            self._speed_cmd = max(0.0, min(1.0, p['speed'] + self._trim))
         self._last_speed_error = serr
-        self._speed_cmd = max(0.0, min(1.0, self._speed_cmd))
 
         out = AckermannDriveStamped()
         out.drive.speed = set_max_speed(self._speed_cmd)
