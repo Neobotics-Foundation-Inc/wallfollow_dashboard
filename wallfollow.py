@@ -119,6 +119,7 @@ class WallFollowNode(Node):
         self._enc_stamp = 0.0
         self._speed_cmd = 0.0
         self._trim = 0.0
+        self._target_f = 0.0
         self._last_speed_error = 0.0
 
     def _odom_cb(self, msg):
@@ -191,15 +192,21 @@ class WallFollowNode(Node):
             self._speed_cmd = 0.0
             self._trim = 0.0
             serr = 0.0
+            self._target_f = 0.0
         else:
             # Feed-forward from the road: target/max_mps is the throttle that
             # roughly holds the target, applied instantly when the road opens
             # so straights start fast. speed_kp/kd only trim the remainder
             # against measured speed instead of building the whole command.
+            # Low-pass the target: the road estimate jitters scan to scan
+            # and feed-forward would pump the throttle with it. ~0.35 s filter.
+            self._target_f += 0.35 * (target - self._target_f)
+            target = self._target_f
             serr = target - self._enc
             if target <= 1e-3:
                 # Slider or curriculum at zero means STOP, unconditionally.
                 self._trim = 0.0
+                self._target_f = 0.0
                 self._speed_cmd = 0.0
                 self._last_speed_error = serr
             else:
