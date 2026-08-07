@@ -85,6 +85,7 @@ def load_params():
         _params.update(yaml.safe_load(YAML_PATH.read_text()))
         _params['speed'] = set_max_speed(_params['speed'])
         _params.setdefault('lookahead', 3.0)  # older yaml files lack these keys
+        _params.setdefault('max_mps', 4.0)
         _params.setdefault('speed_kp', 0.18)
         _params.setdefault('speed_kd', 0.05)
         # 0 = static, 1 = dynamic. Older yamls spell the mode out.
@@ -181,7 +182,9 @@ class WallFollowNode(Node):
             road = min(corridor[len(degs) // 2], corridor[best])
         else:
             road = front
-        target = p['speed'] * min(road / la, 1.0)
+        # Slider is the standard 0..1 command; max_mps converts it to the
+        # real speed the regulator chases (1.0 = the car's top speed).
+        target = p['speed'] * p['max_mps'] * min(road / la, 1.0)
         if time.monotonic() - self._enc_stamp > 0.5:
             # No fresh measurement: never integrate blind. Stop.
             self._speed_cmd = 0.0
