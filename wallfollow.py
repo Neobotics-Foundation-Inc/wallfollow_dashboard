@@ -197,13 +197,21 @@ class WallFollowNode(Node):
             # so straights start fast. speed_kp/kd only trim the remainder
             # against measured speed instead of building the whole command.
             serr = target - self._enc
-            saturated = (self._speed_cmd >= 1.0 and serr > 0) or \
-                        (self._speed_cmd <= 0.0 and serr < 0)
-            if not saturated:
-                self._trim += p['speed_kp'] * serr \
-                    + p['speed_kd'] * (serr - self._last_speed_error)
-            self._trim = max(-0.5, min(0.5, self._trim))
-            self._speed_cmd = target / p['max_mps'] + self._trim
+            if target <= 1e-3:
+                # Slider or curriculum at zero means STOP, unconditionally.
+                self._trim = 0.0
+                self._speed_cmd = 0.0
+                self._last_speed_error = serr
+            else:
+                # Windup guards: never integrate up while the command is high
+                # but the car is not moving (SWB off, held, or blocked), and
+                # keep the trim small: the feed-forward carries the bulk.
+                blocked = self._enc < 0.05 and self._speed_cmd > 0.3
+                if serr < 0 or not blocked:
+                    self._trim += p['speed_kp'] * serr \
+                        + p['speed_kd'] * (serr - self._last_speed_error)
+                self._trim = max(-0.5, min(0.3, self._trim))
+                self._speed_cmd = target / p['max_mps'] + self._trim
         self._last_speed_error = serr
         self._speed_cmd = max(0.0, min(1.0, self._speed_cmd))
 
