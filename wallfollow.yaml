@@ -3,12 +3,12 @@
 # dashboard (or restart the service). There is no UI toggle for mode.
 mode: 1               # 0 = static, 1 = dynamic
 
-speed: 0.0            # throttle command 0..1 (drive.speed). Ships at 0.0: the
-                      # neoracer mux has no ROS deadman (the transmitter SWC
+speed: 0.0            # target speed in m/s on straights. Ships at 0.0: the
+                      # neoracer mux has no ROS deadman (the transmitter SWB
                       # switch is the gate), so nothing drives until you raise it.
 kp: 0.5               # steering strength
-speed_kp: 0.18        # throttle ramp strength toward the target speed
-speed_kd: 0.05        # throttle damper. Raise this if the speed surges.
+speed_kp: 0.08        # throttle added per m/s of speed error, each scan
+speed_kd: 0.03        # damper on the speed error. Raise if throttle surges.
 kd: 4.0               # damper. Raise this if the car wobbles.
 window: 10.0          # averaging window per ray, in degrees. Smooths noise.
 lookahead: 3.0        # meters. Distances are capped here in both modes, so an

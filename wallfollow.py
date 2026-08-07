@@ -47,7 +47,6 @@ MAX_SPEED = 1.0      # hard throttle cap, same idea as drive_real.set_max_speed
 SEARCH_STEP = 2      # degrees between candidate headings (dynamic)
 HALF_CLEAR = 0.21    # meters, car half-width plus margin, inflates obstacles
 CENTER_BIAS = 0.006  # score penalty per degree off-center, stops ping-pong
-CORNER_SLOWDOWN = 0.5  # how much hard steering cuts the target speed
 
 _lock = threading.Lock()
 _params: dict = {}
@@ -116,11 +115,13 @@ class WallFollowNode(Node):
         self.create_subscription(Odometry, '/odom', self._odom_cb, qos_profile_sensor_data)
         self._last_error = 0.0
         self._enc = 0.0
+        self._enc_stamp = 0.0
         self._speed_cmd = 0.0
         self._last_speed_error = 0.0
 
     def _odom_cb(self, msg):
         self._enc = msg.twist.twist.linear.x
+        self._enc_stamp = time.monotonic()
 
     def _mean_at(self, msg, deg, window):
         """Average range (m) in a `window`-deg cone at `deg` (0 = nose, + = right)."""
@@ -170,9 +171,28 @@ class WallFollowNode(Node):
         # Slow when the wall ahead is inside lookahead or when steering hard,
         # and PD-track the target so the ramp is smooth.
         front = min(self._mean_at(msg, 0, p['window']), la)
-        target = p['speed'] * min(front / la, 1.0) * (1.0 - CORNER_SLOWDOWN * abs(cmd))
-        serr = target - self._speed_cmd
-        self._speed_cmd += p['speed_kp'] * serr + p['speed_kd'] * (serr - self._last_speed_error)
+        # Target speed in m/s from how much road the car actually has:
+        # the shorter of the corridor straight ahead and the corridor along
+        # the chosen line. Long corridor = straight = fast; corners shorten
+        # it and slow the car with no separate corner term. speed_kp/kd then
+        # regulate the MEASURED speed from odometry onto that target, so
+        # battery sag and surface changes are corrected instead of baked in.
+        if int(p['mode']) == 1:
+            road = min(corridor[len(degs) // 2], corridor[best])
+        else:
+            road = front
+        target = p['speed'] * min(road / la, 1.0)
+        if time.monotonic() - self._enc_stamp > 0.5:
+            # No fresh measurement: never integrate blind. Stop.
+            self._speed_cmd = 0.0
+            serr = 0.0
+        else:
+            serr = target - self._enc
+            saturated = (self._speed_cmd >= 1.0 and serr > 0) or \
+                        (self._speed_cmd <= 0.0 and serr < 0)
+            if not saturated:
+                self._speed_cmd += p['speed_kp'] * serr \
+                    + p['speed_kd'] * (serr - self._last_speed_error)
         self._last_speed_error = serr
         self._speed_cmd = max(0.0, min(1.0, self._speed_cmd))
 
