@@ -180,7 +180,7 @@ class WallFollowNode(Node):
         # regulate the MEASURED speed from odometry onto that target, so
         # battery sag and surface changes are corrected instead of baked in.
         if int(p['mode']) == 1:
-            road = min(corridor[len(degs) // 2], corridor[best])
+            road = corridor[best]  # the chosen heading's furthest distance
         else:
             road = front
         # Speed, kept simple: the slider IS the throttle. With speed_kp
