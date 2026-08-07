@@ -118,6 +118,7 @@ class WallFollowNode(Node):
         self._enc = 0.0
         self._enc_stamp = 0.0
         self._speed_cmd = 0.0
+        self._trim = 0.0
         self._last_speed_error = 0.0
 
     def _odom_cb(self, msg):
@@ -188,14 +189,21 @@ class WallFollowNode(Node):
         if time.monotonic() - self._enc_stamp > 0.5:
             # No fresh measurement: never integrate blind. Stop.
             self._speed_cmd = 0.0
+            self._trim = 0.0
             serr = 0.0
         else:
+            # Feed-forward from the road: target/max_mps is the throttle that
+            # roughly holds the target, applied instantly when the road opens
+            # so straights start fast. speed_kp/kd only trim the remainder
+            # against measured speed instead of building the whole command.
             serr = target - self._enc
             saturated = (self._speed_cmd >= 1.0 and serr > 0) or \
                         (self._speed_cmd <= 0.0 and serr < 0)
             if not saturated:
-                self._speed_cmd += p['speed_kp'] * serr \
+                self._trim += p['speed_kp'] * serr \
                     + p['speed_kd'] * (serr - self._last_speed_error)
+            self._trim = max(-0.5, min(0.5, self._trim))
+            self._speed_cmd = target / p['max_mps'] + self._trim
         self._last_speed_error = serr
         self._speed_cmd = max(0.0, min(1.0, self._speed_cmd))
 
