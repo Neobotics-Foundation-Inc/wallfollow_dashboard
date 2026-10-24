@@ -47,7 +47,7 @@ After `remove`, the checkout and its tuned wallfollow.yaml stay in place; `bash 
 
 - Lidar view: scan points, active windows or search arc, measured rays; zoom with the scroll wheel, two fingers, or the − and + buttons
 - Live error vs setpoint chart with values in cm and yellow markers at every parameter change
-- Tune panel: speed is a 0 to 1 drag slider that applies while dragging, other parameters apply on Apply
+- Tune panel: speed is a 0 to 1 drag slider that applies while dragging, other parameters apply on Apply. It moves only with a sideways drag, by as far as you drag; a tap, a click or a scroll that starts on it never changes the speed. It always shows the speed the car has, so after a service restart it reads the yaml's speed again
 - Save and Load write and read wallfollow.yaml on the car. Reset (top bar) re-reads the yaml
 - Save log snapshots what is on the live chart to LogN.csv. Load log defaults to the latest save, markers included
 - Works with a mouse, a touch screen or the keyboard, on a laptop, a tablet or a phone, in a light or a dark theme (the switch in the top bar). The number fields have − and + buttons that repeat while held
