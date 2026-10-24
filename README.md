@@ -45,11 +45,12 @@ After `remove`, the checkout and its tuned wallfollow.yaml stay in place; `bash 
 
 ## Dashboard
 
-- Lidar view: scan points, active windows or search arc, measured rays, scroll to zoom
+- Lidar view: scan points, active windows or search arc, measured rays; zoom with the scroll wheel, two fingers, or the − and + buttons
 - Live error vs setpoint chart with values in cm and yellow markers at every parameter change
 - Tune panel: speed is a 0 to 1 drag slider that applies while dragging, other parameters apply on Apply
 - Save and Load write and read wallfollow.yaml on the car. Reset (top bar) re-reads the yaml
 - Save log snapshots what is on the live chart to LogN.csv. Load log defaults to the latest save, markers included
+- Works with a mouse, a touch screen or the keyboard, on a laptop, a tablet or a phone, in a light or a dark theme (the switch in the top bar). The number fields have − and + buttons that repeat while held
 
 ## Modes
 
