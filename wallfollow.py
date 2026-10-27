@@ -20,7 +20,7 @@ Speed feedback comes from /odom.
 """
 
 from collections import deque
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
 from pathlib import Path
@@ -315,7 +315,7 @@ def main():
     node = WallFollowNode()
     spin = threading.Thread(target=_spin, args=(node,), daemon=True)
     spin.start()
-    server = HTTPServer(('0.0.0.0', PORT), Handler)
+    server = ThreadingHTTPServer(('0.0.0.0', PORT), Handler)
 
     # rclpy.init() installs SIGINT/SIGTERM handlers that shut the ROS context
     # down but leave serve_forever() blocked, so the process outlives the
